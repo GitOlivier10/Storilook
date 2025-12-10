@@ -50,7 +50,7 @@ export default function CaptureScreen({ onClose }: CaptureProps) {
                 };
 
                 // 3. Appel de la logique du Hook (Stockage Local)
-                addLocalPhoto(photoData); 
+                await addLocalPhoto(photoData);
                 
                 Alert.alert("Photo Capturée", "Enregistrée dans le manifeste local.");
 

@@ -50,12 +50,12 @@ export default function IndexScreen() {
     // Si le syncStatus n'est pas 'idle', l'événement est considéré comme actif
     const isEventActive = eventData.syncStatus !== 'idle'; 
 
-    const handleCreateEvent = () => {
+    const handleCreateEvent = async () => {
         if (!eventName) {
             Alert.alert("Erreur", "Veuillez donner un nom à votre événement Storilook.");
             return;
         }
-        startEvent(eventName);
+        await startEvent(eventName);
     };
 
     // --- LOGIQUE CONDITIONNELLE CLÉ : Affiche le Feed si l'événement est actif ---

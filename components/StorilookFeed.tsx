@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useStorilookP2P } from '../hooks/useStorilookP2P';
 import AnnotationScreen from './AnnotationScreen'; // <-- NOUVEL IMPORT
@@ -15,6 +15,7 @@ const COLORS = {
 
 // --- Types pour les posts ---
 interface Post {
+    id: string;
     user: string;
     timestamp: string;
     imageUri: string;
@@ -49,6 +50,17 @@ export default function StorilookFeed() {
     const [annotatedMetadata, setAnnotatedMetadata] = useState<any>(null);
 
 
+    const feedPosts: Post[] = useMemo(() => (
+        albumFeed.map((entry) => ({
+            id: entry.id,
+            user: 'Moi',
+            timestamp: new Date(entry.captureTimestamp).toLocaleString(),
+            imageUri: entry.fileUri,
+            comment: entry.comment,
+            tags: entry.tags,
+        }))
+    ), [albumFeed]);
+
     // --- GESTION DU FLUX DE CAPTURE ---
 
     // 1. Passage à l'écran d'annotation après la prise de photo
@@ -58,10 +70,10 @@ export default function StorilookFeed() {
     };
 
     // 2. Finalisation de l'annotation et retour au dashboard
-    const handleAnnotationFinish = (comment: string, tags: string[]) => {
-        // Stocker la photo dans le Manifeste local via le Hook
-        addLocalPhoto({ uri: capturedPhotoUri!, comment, tags }); 
-        // Nettoyer et retourner au Dashboard
+    const handleAnnotationFinish = async (comment: string, tags: string[]) => {
+        if (!capturedPhotoUri) return;
+
+        await addLocalPhoto({ uri: capturedPhotoUri, comment, tags });
         setCapturedPhotoUri(null);
         setCaptureState('dashboard');
         Alert.alert("Photo Stockée", "Votre photo est enregistrée localement en attendant la synchronisation !");
@@ -110,10 +122,10 @@ export default function StorilookFeed() {
         return (
             <ScrollView style={styles.container}>
                 <Text style={styles.albumTitle}>Album Révélé : {eventName}</Text>
-                {albumFeed.map((post: Post, index: number) => (
-                    <FeedItem key={index} post={post} />
+                {feedPosts.map((post: Post) => (
+                    <FeedItem key={post.id} post={post} />
                 ))}
-                <View style={{ height: 100 }} /> 
+                <View style={{ height: 100 }} />
             </ScrollView>
         );
     }

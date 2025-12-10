@@ -74,3 +74,20 @@ test('ensureStoragePermission throws when explicit denial persists', async () =>
 
   await assert.rejects(() => ensureStoragePermission(), /Permission de stockage refusée/);
 });
+
+test('ensureStoragePermission ignores unsupported permission implementations', async () => {
+  const mockFs = {
+    documentDirectory: '/tmp/',
+    cacheDirectory: '/tmp/',
+    getPermissionsAsync: async () => {
+      throw new TypeError('not available');
+    },
+    requestPermissionsAsync: async () => {
+      throw new TypeError('not available');
+    },
+  };
+
+  const { ensureStoragePermission } = buildModule(mockFs);
+
+  await assert.doesNotReject(() => ensureStoragePermission());
+});

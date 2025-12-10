@@ -17,13 +17,27 @@ export async function ensureStoragePermission() {
     return;
   }
 
-  const current = await FileSystem.getPermissionsAsync();
-  if (current.granted || current.status === FileSystem.PermissionStatus?.GRANTED || current.status === 'granted') {
+  let current;
+  try {
+    current = await FileSystem.getPermissionsAsync();
+  } catch (error) {
+    console.warn('API de permission de stockage indisponible, poursuite sans blocage', error);
     return;
   }
 
-  const request = await FileSystem.requestPermissionsAsync();
-  if (request.granted || request.status === FileSystem.PermissionStatus?.GRANTED || request.status === 'granted') {
+  if (current?.granted || current?.status === FileSystem.PermissionStatus?.GRANTED || current?.status === 'granted') {
+    return;
+  }
+
+  let request;
+  try {
+    request = await FileSystem.requestPermissionsAsync();
+  } catch (error) {
+    console.warn('Demande de permission de stockage indisponible, poursuite sans blocage', error);
+    return;
+  }
+
+  if (request?.granted || request?.status === FileSystem.PermissionStatus?.GRANTED || request?.status === 'granted') {
     return;
   }
 

@@ -74,15 +74,38 @@ async function writeManifest(manifest: SessionManifest) {
   await FileSystem.writeAsStringAsync(manifestFile(manifest.sessionId), canonical, { encoding: FileSystem.EncodingType.UTF8 });
 }
 
+export function fallbackChecksum(payload: string): string {
+  // Fallback déterministe sans dépendance native (dérivé d'un hash 32 bits non cryptographique)
+  let hash = 0;
+  for (let i = 0; i < payload.length; i += 1) {
+    const code = payload.charCodeAt(i);
+    hash = (hash << 5) - hash + code;
+    hash |= 0; // Force sur 32 bits
+  }
+
+  // Normalise en hexadécimal sur 8 caractères pour un affichage cohérent
+  return `fallback-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
 async function checksumFromString(payload: string): Promise<string> {
   const tempPath = `${FileSystem.cacheDirectory}storilook-manifest-${Date.now()}.json`;
-  await FileSystem.writeAsStringAsync(tempPath, payload, { encoding: FileSystem.EncodingType.UTF8 });
-  const info = await FileSystem.getInfoAsync(tempPath, { md5: true });
-  await FileSystem.deleteAsync(tempPath, { idempotent: true });
-  if (!info.md5) {
-    throw new Error('Impossible de calculer le checksum local.');
+  try {
+    await FileSystem.writeAsStringAsync(tempPath, payload, { encoding: FileSystem.EncodingType.UTF8 });
+    const info = await FileSystem.getInfoAsync(tempPath, { md5: true });
+    await FileSystem.deleteAsync(tempPath, { idempotent: true });
+    if (!info.md5) {
+      return fallbackChecksum(payload);
+    }
+    return info.md5;
+  } catch (error) {
+    console.warn('Checksum natif indisponible, utilisation du fallback JS', error);
+    try {
+      await FileSystem.deleteAsync(tempPath, { idempotent: true });
+    } catch {
+      // ignore cleanup failure
+    }
+    return fallbackChecksum(payload);
   }
-  return info.md5;
 }
 
 export const generateSessionId = () => `SL-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;

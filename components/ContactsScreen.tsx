@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 // --- Constantes de l'Identité Storilook ---
 const COLORS = {
@@ -9,85 +9,39 @@ const COLORS = {
   background: '#FAFAFA',   // Fond blanc cassé
   text: '#333',
   lightGray: '#f0f0f0',
-  onlineGreen: '#28a745',  // Vert pour le statut "Connecté / Proche"
 };
-
-// --- Structure de Données Simulant les Contacts ---
-interface ContactData {
-    id: string;
-    name: string;
-    lastEvent: string;
-    isNearby: boolean; // Simule la détection P2P
-}
-
-const MOCK_CONTACTS: ContactData[] = [
-    { id: 'c1', name: 'Amicia', lastEvent: 'Anniversaire Bruce', isNearby: true },
-    { id: 'c2', name: 'Olivier M.', lastEvent: 'Week-end Ski', isNearby: false },
-    { id: 'c3', name: 'Gérard V.', lastEvent: 'Table Ronde', isNearby: false },
-    { id: 'c4', name: 'Éliott V.', lastEvent: 'Projet EPFL', isNearby: true },
-];
-
-// --- Composant pour une Ligne de Contact ---
-const ContactItem = ({ contact }: { contact: ContactData }) => (
-    <View style={styles.contactItem}>
-        
-        {/* Icône/Avatar */}
-        <View style={[styles.avatar, contact.isNearby && styles.avatarNearby]}>
-            <Text style={styles.avatarText}>{contact.name.charAt(0)}</Text>
-        </View>
-
-        {/* Détails */}
-        <View style={styles.contactDetails}>
-            <Text style={styles.contactName}>{contact.name}</Text>
-            <Text style={styles.contactLastEvent}>
-                {contact.lastEvent}
-            </Text>
-        </View>
-
-        {/* Statut P2P */}
-        <View style={styles.contactStatus}>
-            {contact.isNearby ? (
-                <Text style={styles.statusNearby}>✅ Proche</Text>
-            ) : (
-                <Text style={styles.statusOffline}>Distant</Text>
-            )}
-        </View>
-    </View>
-);
 
 // --- Composant Principal de l'écran Contacts ---
 export default function ContactsScreen() {
-
-    const handleInvite = () => {
-        Alert.alert("Inviter un ami", "Fonctionnalité d'invitation par lien ou QR code en cours de développement (pour V2).");
-    };
-
     return (
         <ScrollView style={styles.container}>
             <Text style={styles.header}>Mes Contacts Storilook</Text>
 
-            {/* Barre de Recherche et d'Invitation */}
+            {/* Barre de Recherche (placeholder pour V2/V3) */}
             <View style={styles.searchBar}>
                 <TextInput
                     style={styles.searchInput}
                     placeholder="Rechercher un contact..."
                     placeholderTextColor="#999"
+                    editable={false}
                 />
-                <TouchableOpacity style={styles.inviteButton} onPress={handleInvite}>
+                <TouchableOpacity style={styles.inviteButton} disabled>
                     <Ionicons name="person-add-outline" size={20} color="white" />
                 </TouchableOpacity>
             </View>
-            
+
             <View style={styles.sectionTitleContainer}>
-                <Text style={styles.sectionTitle}>Amis ({MOCK_CONTACTS.length})</Text>
-                <Text style={styles.sectionTitleHint}>Le statut "Proche" est mis à jour en local.</Text>
+                <Text style={styles.sectionTitle}>Détection locale</Text>
+                <Text style={styles.sectionTitleHint}>Le carnet d'adresses sera alimenté par les pairs P2P sur place.</Text>
             </View>
 
-            {/* Liste des Contacts */}
-            <View style={styles.contactList}>
-                {MOCK_CONTACTS.map(contact => (
-                    <ContactItem key={contact.id} contact={contact} />
-                ))}
+            <View style={styles.emptyState}>
+                <Ionicons name="people-outline" size={32} color={COLORS.text} />
+                <Text style={styles.emptyTitle}>Aucun pair détecté</Text>
+                <Text style={styles.emptyText}>
+                    Lancez un événement depuis l'onglet "En Cours" et demandez aux invités de scanner le QR pour apparaître ic
+                    i.
+                </Text>
             </View>
 
         </ScrollView>
@@ -134,9 +88,6 @@ const styles = StyleSheet.create({
 
     // Liste et Items
     sectionTitleContainer: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'flex-end',
         paddingHorizontal: 20,
         marginBottom: 10,
     },
@@ -149,60 +100,23 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#999',
     },
-    contactList: {
+    emptyState: {
+        padding: 20,
+        marginHorizontal: 20,
+        marginTop: 10,
         backgroundColor: 'white',
-        borderTopWidth: 1,
-        borderColor: '#ddd',
-    },
-    contactItem: {
-        flexDirection: 'row',
+        borderRadius: 12,
         alignItems: 'center',
-        paddingHorizontal: 20,
-        paddingVertical: 15,
-        borderBottomWidth: 1,
-        borderColor: COLORS.lightGray,
+        gap: 8,
     },
-    avatar: {
-        width: 45,
-        height: 45,
-        borderRadius: 22.5,
-        backgroundColor: COLORS.lightGray,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 15,
-    },
-    avatarNearby: {
-        borderWidth: 2,
-        borderColor: COLORS.onlineGreen,
-    },
-    avatarText: {
-        color: COLORS.primary,
-        fontWeight: 'bold',
-        fontSize: 18,
-    },
-    contactDetails: {
-        flex: 1,
-    },
-    contactName: {
+    emptyTitle: {
         fontSize: 16,
         fontWeight: '600',
         color: COLORS.text,
     },
-    contactLastEvent: {
+    emptyText: {
         fontSize: 13,
-        color: '#999',
-    },
-    contactStatus: {
-        padding: 5,
-        borderRadius: 5,
-    },
-    statusNearby: {
-        color: COLORS.onlineGreen,
-        fontWeight: 'bold',
-        fontSize: 13,
-    },
-    statusOffline: {
-        color: '#999',
-        fontSize: 13,
+        color: '#666',
+        textAlign: 'center',
     },
 });

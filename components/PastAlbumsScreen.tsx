@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons'; // Utilisé pour les icônes (à installer si non fait)
-import React from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { listSessionMetadata, SessionRegistryEntry } from '../services/manifest';
 
 // --- Constantes de l'Identité Storilook ---
 const COLORS = {
@@ -9,80 +10,63 @@ const COLORS = {
   background: '#FAFAFA',   // Fond blanc cassé
   text: '#333',
   lightGray: '#f0f0f0',
-  premiumGold: '#FFD700',  // Or pour le Premium
 };
-
-// --- Structure de Données Simulant les Anciens Albums ---
-interface AlbumData {
-    id: string;
-    name: string;
-    date: string;
-    photos: number;
-    participants: number;
-    isArchived: boolean; // Vrai si plus de 7 jours (Archivé = Verrouillé en Free)
-}
-
-const MOCK_ALBUMS: AlbumData[] = [
-    { id: 'a1', name: 'Anniversaire Bruce', date: '01 Déc 2025', photos: 95, participants: 8, isArchived: true },
-    { id: 'a2', name: 'Weekend Ski', date: '04 Déc 2025', photos: 120, participants: 12, isArchived: true },
-    { id: 'a3', name: 'Dernière Soirée', date: 'Hier (07 Déc 2025)', photos: 45, participants: 6, isArchived: false },
-];
 
 // --- Composant pour une Carte d'Album ---
-const AlbumCard = ({ album }: { album: AlbumData }) => {
-    
-    const handlePress = () => {
-        if (album.isArchived) {
-            Alert.alert(
-                "Album Archivé (Premium)",
-                `L'album "${album.name}" a été archivé après 7 jours dans la version Free. Passez à Premium pour le revoir et débloquer l'archivage permanent !`,
-                [{ text: "Passer à Premium", onPress: () => console.log("Vers écran Premium") }, { text: "Annuler", style: 'cancel' }]
-            );
-        } else {
-            // Dans la vraie app, on naviguerait vers le Feed Storilook de cet album
-            Alert.alert("Album Actif", `Ouverture de l'album "${album.name}"...`);
-        }
-    };
+const AlbumCard = ({ album }: { album: SessionRegistryEntry }) => (
+    <View style={styles.albumCard}>
+        <View style={styles.cardHeader}>
+            <Text style={styles.albumName}>{album.eventName}</Text>
+            <Text style={styles.activeTag}>Local</Text>
+        </View>
 
-    return (
-        <TouchableOpacity 
-            style={[styles.albumCard, album.isArchived && styles.archivedCard]} 
-            onPress={handlePress}
-            activeOpacity={album.isArchived ? 0.8 : 0.6}
-        >
-            <View style={styles.cardHeader}>
-                <Text style={styles.albumName}>{album.name}</Text>
-                {album.isArchived && (
-                    <View style={styles.premiumBadge}>
-                        <Ionicons name="lock-closed" size={14} color={COLORS.text} />
-                        <Text style={styles.premiumText}>Archivé</Text>
-                    </View>
-                )}
-                {!album.isArchived && (
-                    <Text style={styles.activeTag}>Actif</Text>
-                )}
-            </View>
-
-            <View style={styles.cardDetails}>
-                <Text style={styles.detailText}><Ionicons name="calendar-outline" size={14} color="#6c757d" /> {album.date}</Text>
-                <Text style={styles.detailText}><Ionicons name="images-outline" size={14} color="#6c757d" /> {album.photos} Photos</Text>
-                <Text style={styles.detailText}><Ionicons name="people-outline" size={14} color="#6c757d" /> {album.participants} Part.</Text>
-            </View>
-        </TouchableOpacity>
-    );
-};
+        <View style={styles.cardDetails}>
+            <Text style={styles.detailText}><Ionicons name="calendar-outline" size={14} color="#6c757d" /> Créé le {new Date(album.createdAt).toLocaleDateString()}</Text>
+            <Text style={styles.detailText}><Ionicons name="time-outline" size={14} color="#6c757d" /> Dernière mise à jour {new Date(album.lastUpdated).toLocaleString()}</Text>
+            <Text style={styles.detailText}><Ionicons name="key-outline" size={14} color="#6c757d" /> {album.sessionId}</Text>
+        </View>
+    </View>
+);
 
 
 // --- Composant Principal de l'écran Albums Passés ---
 export default function PastAlbumsScreen() {
+    const [sessions, setSessions] = useState<SessionRegistryEntry[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        (async () => {
+            try {
+                const storedSessions = await listSessionMetadata();
+                setSessions(storedSessions);
+            } catch (error) {
+                console.warn('Impossible de lister les sessions Storilook', error);
+            } finally {
+                setLoading(false);
+            }
+        })();
+    }, []);
+
     return (
         <ScrollView style={styles.container}>
             <Text style={styles.header}>Albums Passés</Text>
-            
-            {/* Liste des Albums */}
+
+            {loading && (
+                <View style={styles.infoBox}>
+                    <ActivityIndicator size="small" color={COLORS.primary} />
+                    <Text style={styles.infoText}>Lecture des albums locaux...</Text>
+                </View>
+            )}
+
+            {!loading && sessions.length === 0 && (
+                <View style={styles.infoBox}>
+                    <Text style={styles.infoText}>Aucun album n'a encore été synchronisé ou créé sur cet appareil.</Text>
+                </View>
+            )}
+
             <View style={styles.albumList}>
-                {MOCK_ALBUMS.map(album => (
-                    <AlbumCard key={album.id} album={album} />
+                {sessions.map(album => (
+                    <AlbumCard key={album.sessionId} album={album} />
                 ))}
             </View>
         </ScrollView>
@@ -113,14 +97,6 @@ const styles = StyleSheet.create({
         color: COLORS.text,
         marginBottom: 5,
     },
-    infoLink: {
-        marginTop: 5,
-    },
-    infoLinkText: {
-        fontSize: 14,
-        color: COLORS.secondary, // Orange pour le lien Premium
-        fontWeight: 'bold',
-    },
     albumList: {
         paddingHorizontal: 20,
     },
@@ -135,12 +111,6 @@ const styles = StyleSheet.create({
         shadowRadius: 3,
         elevation: 3,
     },
-    archivedCard: {
-        backgroundColor: COLORS.lightGray,
-        opacity: 0.8,
-        borderLeftWidth: 4,
-        borderLeftColor: COLORS.premiumGold, // Bande Or pour attirer l'oeil
-    },
     cardHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -152,28 +122,13 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         color: COLORS.text,
     },
-    premiumBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: COLORS.premiumGold,
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        borderRadius: 10,
-    },
-    premiumText: {
-        marginLeft: 4,
-        fontSize: 12,
-        fontWeight: 'bold',
-        color: COLORS.text,
-    },
     activeTag: {
         color: '#28a745', // Vert pour Actif
         fontWeight: 'bold',
         fontSize: 12,
     },
     cardDetails: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
+        gap: 4,
         marginTop: 5,
     },
     detailText: {

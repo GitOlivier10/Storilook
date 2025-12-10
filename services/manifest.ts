@@ -7,6 +7,18 @@ const mediaDir = (sessionId: string) => `${sessionDir(sessionId)}/media`;
 const manifestFile = (sessionId: string) => `${sessionDir(sessionId)}/manifest.json`;
 const registryFile = `${STORAGE_ROOT}/sessions.json`;
 
+async function ensureStoragePermission() {
+  const { granted } = await FileSystem.getPermissionsAsync();
+  if (granted) {
+    return;
+  }
+
+  const request = await FileSystem.requestPermissionsAsync();
+  if (!request.granted) {
+    throw new Error('Permission de stockage refusée');
+  }
+}
+
 async function ensureDir(path: string) {
   const info = await FileSystem.getInfoAsync(path);
   if (!info.exists) {
@@ -14,7 +26,7 @@ async function ensureDir(path: string) {
   }
 }
 
-type SessionRegistryEntry = {
+export type SessionRegistryEntry = {
   sessionId: string;
   eventName: string;
   createdAt: string;
@@ -27,6 +39,7 @@ type SessionRegistry = {
 };
 
 async function loadRegistry(): Promise<SessionRegistry> {
+  await ensureStoragePermission();
   const info = await FileSystem.getInfoAsync(registryFile);
   if (!info.exists) {
     return { lastSessionId: null, sessions: [] };
@@ -42,6 +55,7 @@ async function writeRegistry(registry: SessionRegistry) {
 }
 
 export async function purgeAllSessions() {
+  await ensureStoragePermission();
   const info = await FileSystem.getInfoAsync(STORAGE_ROOT);
   if (info.exists) {
     await FileSystem.deleteAsync(STORAGE_ROOT, { idempotent: true });
@@ -111,6 +125,7 @@ async function checksumFromString(payload: string): Promise<string> {
 export const generateSessionId = () => `SL-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
 export async function initSession(eventName: string): Promise<SessionManifest> {
+  await ensureStoragePermission();
   const sessionId = generateSessionId();
   await ensureDir(STORAGE_ROOT);
   await ensureDir(sessionDir(sessionId));
@@ -154,6 +169,7 @@ const buildEntryChecksum = async (entry: Omit<ManifestEntry, 'checksum'>): Promi
 
 export async function addLocalCapture(input: CaptureInput): Promise<ManifestEntry> {
   const { sessionId, sourceUri, comment, tags, capturedAt } = input;
+  await ensureStoragePermission();
   await ensureDir(STORAGE_ROOT);
   await ensureDir(sessionDir(sessionId));
   await ensureDir(mediaDir(sessionId));

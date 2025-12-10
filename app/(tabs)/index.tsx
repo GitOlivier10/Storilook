@@ -45,22 +45,23 @@ const CreateForm: React.FC<CreateFormProps> = ({ eventName, setEventName, handle
 // --- Composant Principal du Tab Index ---
 export default function IndexScreen() {
     const [eventName, setEventName] = useState('');
-    const { eventData, startEvent } = useStorilookP2P();
+    const storilook = useStorilookP2P();
+    const { eventData, startEvent, resetAllSessions } = storilook;
     
     // Si le syncStatus n'est pas 'idle', l'événement est considéré comme actif
     const isEventActive = eventData.syncStatus !== 'idle'; 
 
-    const handleCreateEvent = () => {
+    const handleCreateEvent = async () => {
         if (!eventName) {
             Alert.alert("Erreur", "Veuillez donner un nom à votre événement Storilook.");
             return;
         }
-        startEvent(eventName);
+        await startEvent(eventName);
     };
 
     // --- LOGIQUE CONDITIONNELLE CLÉ : Affiche le Feed si l'événement est actif ---
     if (isEventActive) {
-        return <StorilookFeed />;
+        return <StorilookFeed eventData={eventData} triggerSynchronization={storilook.triggerSynchronization} addLocalPhoto={storilook.addLocalPhoto} />;
     }
 
     // Sinon, on affiche l'écran de création (Accueil par défaut)
@@ -77,13 +78,16 @@ export default function IndexScreen() {
                     </Text>
                 </View>
                 
-                <CreateForm 
-                    eventName={eventName} 
-                    setEventName={setEventName} 
-                    handleCreateEvent={handleCreateEvent} 
-                    isLaunched={isEventActive} 
-                />
-            </View>
+        <CreateForm
+            eventName={eventName}
+            setEventName={setEventName}
+            handleCreateEvent={handleCreateEvent}
+            isLaunched={isEventActive}
+        />
+        <TouchableOpacity style={styles.secondaryButton} onPress={resetAllSessions}>
+            <Text style={styles.secondaryButtonText}>🔄 Réinitialiser les sessions locales</Text>
+        </TouchableOpacity>
+    </View>
         </View>
     );
 }
@@ -161,6 +165,18 @@ const styles = StyleSheet.create({
         color: 'white',
         fontSize: 18,
         fontWeight: 'bold',
+    },
+    secondaryButton: {
+        marginTop: 10,
+        padding: 12,
+        backgroundColor: '#f1f3f5',
+        borderRadius: 8,
+        width: '100%',
+    },
+    secondaryButtonText: {
+        color: COLORS.text,
+        textAlign: 'center',
+        fontWeight: '600',
     },
     // Les styles de QR code sont conservés au cas où vous souhaiteriez les réutiliser
     qrCodeContainer: { 

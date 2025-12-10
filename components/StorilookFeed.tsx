@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useStorilookP2P } from '../hooks/useStorilookP2P';
+import QRCode from 'react-native-qrcode-svg';
 import AnnotationScreen from './AnnotationScreen'; // <-- NOUVEL IMPORT
 import CameraHandler from './CameraHandler'; // <-- NOUVEL IMPORT
+import { serializeSessionSharePayload } from '../services/sessionShare';
+import { StorilookP2PHandles } from '../hooks/useStorilookP2P';
 
 // --- Définitions de style (réutilisées) ---
 const COLORS = {
@@ -15,6 +17,7 @@ const COLORS = {
 
 // --- Types pour les posts ---
 interface Post {
+    id: string;
     user: string;
     timestamp: string;
     imageUri: string;
@@ -38,16 +41,39 @@ const FeedItem: React.FC<{ post: Post }> = ({ post }) => (
 );
 
 // --- L'écran principal Storilook Feed ---
-export default function StorilookFeed() {
-    
-    const { eventData, triggerSynchronization, addLocalPhoto } = useStorilookP2P();
-    const { syncStatus, eventName, albumFeed, myPhotos } = eventData;
+type StorilookFeedProps = Pick<StorilookP2PHandles, 'eventData' | 'triggerSynchronization' | 'addLocalPhoto'>;
+
+export default function StorilookFeed({ eventData, triggerSynchronization, addLocalPhoto }: StorilookFeedProps) {
+
+    const { syncStatus, eventName, albumFeed, myPhotos, id: sessionId, createdAt, manifestChecksum } = eventData;
     
     // NOUVEAUX ÉTATS POUR LA GESTION DE LA CAPTURE
     const [captureState, setCaptureState] = useState<'dashboard' | 'camera' | 'annotation'>('dashboard');
     const [capturedPhotoUri, setCapturedPhotoUri] = useState<string | null>(null);
     const [annotatedMetadata, setAnnotatedMetadata] = useState<any>(null);
 
+
+    const feedPosts: Post[] = useMemo(() => (
+        albumFeed.map((entry) => ({
+            id: entry.id,
+            user: 'Moi',
+            timestamp: new Date(entry.captureTimestamp).toLocaleString(),
+            imageUri: entry.fileUri,
+            comment: entry.comment,
+            tags: entry.tags,
+        }))
+    ), [albumFeed]);
+
+    const sharePayload = useMemo(
+        () =>
+            sessionId
+                ? serializeSessionSharePayload(
+                    { sessionId, eventName, createdAt: createdAt || new Date().toISOString() },
+                    manifestChecksum,
+                )
+                : null,
+        [sessionId, eventName, createdAt, manifestChecksum],
+    );
 
     // --- GESTION DU FLUX DE CAPTURE ---
 
@@ -58,10 +84,10 @@ export default function StorilookFeed() {
     };
 
     // 2. Finalisation de l'annotation et retour au dashboard
-    const handleAnnotationFinish = (comment: string, tags: string[]) => {
-        // Stocker la photo dans le Manifeste local via le Hook
-        addLocalPhoto({ uri: capturedPhotoUri!, comment, tags }); 
-        // Nettoyer et retourner au Dashboard
+    const handleAnnotationFinish = async (comment: string, tags: string[]) => {
+        if (!capturedPhotoUri) return;
+
+        await addLocalPhoto({ uri: capturedPhotoUri, comment, tags });
         setCapturedPhotoUri(null);
         setCaptureState('dashboard');
         Alert.alert("Photo Stockée", "Votre photo est enregistrée localement en attendant la synchronisation !");
@@ -110,10 +136,24 @@ export default function StorilookFeed() {
         return (
             <ScrollView style={styles.container}>
                 <Text style={styles.albumTitle}>Album Révélé : {eventName}</Text>
-                {albumFeed.map((post: Post, index: number) => (
-                    <FeedItem key={index} post={post} />
+                <View style={styles.sessionCard}>
+                    <Text style={styles.sessionLabel}>Session locale</Text>
+                    <Text style={styles.sessionValue}>{sessionId}</Text>
+                    <Text style={styles.sessionCreatedAt}>Créé le {new Date(createdAt).toLocaleString()}</Text>
+                    {sharePayload && (
+                        <View style={styles.qrWrapper}>
+                            <QRCode value={sharePayload} size={160} backgroundColor="white" />
+                            <Text style={styles.qrHint}>Scannez pour rejoindre la session P2P.</Text>
+                            <Text style={styles.qrChecksum}>
+                                Checksum manifest : {manifestChecksum ? `${manifestChecksum.slice(0, 8)}…` : 'calcul en cours'}
+                            </Text>
+                        </View>
+                    )}
+                </View>
+                {feedPosts.map((post: Post) => (
+                    <FeedItem key={post.id} post={post} />
                 ))}
-                <View style={{ height: 100 }} /> 
+                <View style={{ height: 100 }} />
             </ScrollView>
         );
     }
@@ -125,6 +165,21 @@ export default function StorilookFeed() {
                 <View style={styles.header}>
                     <Text style={styles.eventName}>{eventName}</Text>
                     <Text style={styles.eventStatus}>Statut : En Attente de Synchro ({syncStatus})</Text>
+                </View>
+
+                <View style={styles.sessionCard}>
+                    <Text style={styles.sessionLabel}>Session locale</Text>
+                    <Text style={styles.sessionValue}>{sessionId}</Text>
+                    <Text style={styles.sessionCreatedAt}>Créé le {new Date(createdAt).toLocaleString()}</Text>
+                    <Text style={styles.sessionChecksum}>
+                        Checksum manifest : {manifestChecksum ? `${manifestChecksum.slice(0, 8)}…` : 'calcul en cours'}
+                    </Text>
+                    {sharePayload && (
+                        <View style={styles.qrInline}>
+                            <QRCode value={sharePayload} size={120} backgroundColor="white" />
+                            <Text style={styles.qrHint}>Partagez ce QR pour connecter les invités en local.</Text>
+                        </View>
+                    )}
                 </View>
 
                 {/* Bloc de Statut de la Capture */}
@@ -178,6 +233,15 @@ const styles = StyleSheet.create({
     captureButtonText: { fontSize: 24, fontWeight: 'bold', color: COLORS.text, },
     syncButton: { backgroundColor: COLORS.primary, padding: 20, alignItems: 'center', position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10, borderTopLeftRadius: 10, borderTopRightRadius: 10, },
     syncButtonText: { color: 'white', fontSize: 18, fontWeight: 'bold', },
+    sessionCard: { backgroundColor: 'white', padding: 16, borderRadius: 10, marginBottom: 20, borderWidth: 1, borderColor: COLORS.lightGray },
+    sessionLabel: { fontSize: 14, color: COLORS.text, fontWeight: '600' },
+    sessionValue: { fontSize: 18, fontWeight: 'bold', color: COLORS.primary, marginTop: 6 },
+    sessionCreatedAt: { fontSize: 13, color: '#666', marginTop: 2 },
+    sessionChecksum: { fontSize: 13, color: '#666', marginTop: 6 },
+    qrInline: { marginTop: 12, alignItems: 'center' },
+    qrWrapper: { marginTop: 16, alignItems: 'center', backgroundColor: 'white', padding: 10, borderRadius: 8 },
+    qrHint: { fontSize: 12, color: '#555', marginTop: 8, textAlign: 'center' },
+    qrChecksum: { fontSize: 12, color: '#555', marginTop: 4 },
 });
 
 const feedStyles = StyleSheet.create({

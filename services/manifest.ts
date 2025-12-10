@@ -7,16 +7,27 @@ const mediaDir = (sessionId: string) => `${sessionDir(sessionId)}/media`;
 const manifestFile = (sessionId: string) => `${sessionDir(sessionId)}/manifest.json`;
 const registryFile = `${STORAGE_ROOT}/sessions.json`;
 
-async function ensureStoragePermission() {
-  const { granted } = await FileSystem.getPermissionsAsync();
-  if (granted) {
+export async function ensureStoragePermission() {
+  const hasPermissionApi =
+    typeof FileSystem.getPermissionsAsync === 'function' &&
+    typeof FileSystem.requestPermissionsAsync === 'function';
+
+  if (!hasPermissionApi) {
+    // La plateforme (ex: web) ne nécessite pas ou n'expose pas de permissions.
+    return;
+  }
+
+  const current = await FileSystem.getPermissionsAsync();
+  if (current.granted || current.status === FileSystem.PermissionStatus?.GRANTED || current.status === 'granted') {
     return;
   }
 
   const request = await FileSystem.requestPermissionsAsync();
-  if (!request.granted) {
-    throw new Error('Permission de stockage refusée');
+  if (request.granted || request.status === FileSystem.PermissionStatus?.GRANTED || request.status === 'granted') {
+    return;
   }
+
+  throw new Error('Permission de stockage refusée');
 }
 
 async function ensureDir(path: string) {

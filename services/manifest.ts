@@ -5,12 +5,61 @@ const STORAGE_ROOT = `${FileSystem.documentDirectory}storilook`;
 const sessionDir = (sessionId: string) => `${STORAGE_ROOT}/${sessionId}`;
 const mediaDir = (sessionId: string) => `${sessionDir(sessionId)}/media`;
 const manifestFile = (sessionId: string) => `${sessionDir(sessionId)}/manifest.json`;
+const registryFile = `${STORAGE_ROOT}/sessions.json`;
 
 async function ensureDir(path: string) {
   const info = await FileSystem.getInfoAsync(path);
   if (!info.exists) {
     await FileSystem.makeDirectoryAsync(path, { intermediates: true });
   }
+}
+
+type SessionRegistryEntry = {
+  sessionId: string;
+  eventName: string;
+  createdAt: string;
+  lastUpdated: string;
+};
+
+type SessionRegistry = {
+  lastSessionId: string | null;
+  sessions: SessionRegistryEntry[];
+};
+
+async function loadRegistry(): Promise<SessionRegistry> {
+  const info = await FileSystem.getInfoAsync(registryFile);
+  if (!info.exists) {
+    return { lastSessionId: null, sessions: [] };
+  }
+  const raw = await FileSystem.readAsStringAsync(registryFile, { encoding: FileSystem.EncodingType.UTF8 });
+  return JSON.parse(raw) as SessionRegistry;
+}
+
+async function writeRegistry(registry: SessionRegistry) {
+  await ensureDir(STORAGE_ROOT);
+  const canonical = JSON.stringify(registry);
+  await FileSystem.writeAsStringAsync(registryFile, canonical, { encoding: FileSystem.EncodingType.UTF8 });
+}
+
+async function upsertSessionMetadata(manifest: SessionManifest, lastUpdated?: string) {
+  const registry = await loadRegistry();
+  const updateTimestamp = lastUpdated ?? manifest.createdAt;
+  const nextEntry: SessionRegistryEntry = {
+    sessionId: manifest.sessionId,
+    eventName: manifest.eventName,
+    createdAt: manifest.createdAt,
+    lastUpdated: updateTimestamp,
+  };
+
+  const existingIndex = registry.sessions.findIndex((session) => session.sessionId === manifest.sessionId);
+  if (existingIndex >= 0) {
+    registry.sessions[existingIndex] = { ...registry.sessions[existingIndex], ...nextEntry };
+  } else {
+    registry.sessions.push(nextEntry);
+  }
+
+  registry.lastSessionId = manifest.sessionId;
+  await writeRegistry(registry);
 }
 
 async function writeManifest(manifest: SessionManifest) {
@@ -45,6 +94,7 @@ export async function initSession(eventName: string): Promise<SessionManifest> {
   };
 
   await writeManifest(manifest);
+  await upsertSessionMetadata(manifest);
   return manifest;
 }
 
@@ -100,6 +150,7 @@ export async function addLocalCapture(input: CaptureInput): Promise<ManifestEntr
   const manifest = await loadManifest(sessionId);
   const updatedManifest: SessionManifest = { ...manifest, entries: [...manifest.entries, entry] };
   await writeManifest(updatedManifest);
+  await upsertSessionMetadata(updatedManifest, entry.captureTimestamp);
 
   return entry;
 }
@@ -117,6 +168,7 @@ export async function markSynced(sessionId: string, entryIds: string[]): Promise
   );
   const updatedManifest: SessionManifest = { ...manifest, entries: updatedEntries };
   await writeManifest(updatedManifest);
+  await upsertSessionMetadata(updatedManifest);
   return updatedManifest;
 }
 
@@ -124,4 +176,23 @@ export async function computeManifestChecksum(sessionId: string): Promise<string
   const manifest = await loadManifest(sessionId);
   const canonical = canonicalManifestString(manifest);
   return checksumFromString(canonical);
+}
+
+export async function loadLastSessionManifest(): Promise<SessionManifest | null> {
+  const registry = await loadRegistry();
+  if (!registry.lastSessionId) {
+    return null;
+  }
+
+  try {
+    return await loadManifest(registry.lastSessionId);
+  } catch (error) {
+    console.warn('Impossible de charger la dernière session Storilook', error);
+    return null;
+  }
+}
+
+export async function listSessionMetadata(): Promise<SessionRegistryEntry[]> {
+  const registry = await loadRegistry();
+  return registry.sessions.sort((a, b) => b.lastUpdated.localeCompare(a.lastUpdated));
 }

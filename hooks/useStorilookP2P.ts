@@ -4,6 +4,7 @@ import {
   addLocalCapture,
   computeManifestChecksum,
   initSession,
+  loadLastSessionManifest,
   listEntries,
 } from '../services/manifest';
 import { ManifestEntry } from '../services/manifestUtils';
@@ -13,19 +14,23 @@ type SyncStatus = 'idle' | 'advertising' | 'negotiating' | 'transferring' | 'com
 interface EventState {
   id: string | null;
   eventName: string;
+  createdAt: string;
   participants: string[];
   myPhotos: ManifestEntry[];
   albumFeed: ManifestEntry[];
   syncStatus: SyncStatus;
+  manifestChecksum: string | null;
 }
 
 const INITIAL_STATE: EventState = {
   id: null,
   eventName: '',
+  createdAt: '',
   participants: ['Vous'],
   myPhotos: [],
   albumFeed: [],
   syncStatus: 'idle',
+  manifestChecksum: null,
 };
 
 export const useStorilookP2P = () => {
@@ -37,13 +42,16 @@ export const useStorilookP2P = () => {
   const startEvent = useCallback(async (name: string) => {
     try {
       const manifest = await initSession(name);
+      const checksum = await computeManifestChecksum(manifest.sessionId);
       setEventState({
         id: manifest.sessionId,
         eventName: manifest.eventName,
+        createdAt: manifest.createdAt,
         participants: ['Vous'],
         myPhotos: manifest.entries,
         albumFeed: [],
         syncStatus: 'advertising',
+        manifestChecksum: checksum,
       });
       setIsP2PActive(true);
       Alert.alert('Succès', `L'événement '${name}' est lancé. ID: ${manifest.sessionId}`);
@@ -66,7 +74,12 @@ export const useStorilookP2P = () => {
           tags: photoData.tags,
           capturedAt: photoData.capturedAt ?? photoData.timestamp,
         });
-        setEventState((prev) => ({ ...prev, myPhotos: [...prev.myPhotos, entry] }));
+        const checksum = await computeManifestChecksum(eventState.id);
+        setEventState((prev) => ({
+          ...prev,
+          myPhotos: [...prev.myPhotos, entry],
+          manifestChecksum: checksum,
+        }));
       } catch (error) {
         console.error(error);
         Alert.alert('Erreur', 'Impossible de stocker la photo localement.');
@@ -90,6 +103,7 @@ export const useStorilookP2P = () => {
         albumFeed: entries,
         myPhotos: entries.filter((entry) => entry.status === 'local'),
         syncStatus: 'complete',
+        manifestChecksum: checksum,
       }));
 
       Alert.alert('Succès', `Album synchronisé. Checksum manifest: ${checksum.slice(0, 8)}…`);
@@ -105,6 +119,29 @@ export const useStorilookP2P = () => {
       console.log('Nettoyage : Arrêt du service P2P.');
     }
   }, [hasActiveSession]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const lastSession = await loadLastSessionManifest();
+        if (!lastSession) return;
+        const checksum = await computeManifestChecksum(lastSession.sessionId);
+        setEventState({
+          id: lastSession.sessionId,
+          eventName: lastSession.eventName,
+          createdAt: lastSession.createdAt,
+          participants: ['Vous'],
+          myPhotos: lastSession.entries.filter((entry) => entry.status === 'local'),
+          albumFeed: [],
+          syncStatus: 'advertising',
+          manifestChecksum: checksum,
+        });
+        setIsP2PActive(true);
+      } catch (error) {
+        console.warn('Impossible de restaurer la dernière session Storilook', error);
+      }
+    })();
+  }, []);
 
   return {
     eventData: eventState,

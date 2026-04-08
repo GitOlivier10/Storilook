@@ -1,5 +1,5 @@
 import * as FileSystem from 'expo-file-system';
-import { canonicalManifestString, ManifestEntry, SessionManifest, sortManifestEntries } from './manifestUtils';
+import { canonicalManifestString, FeedComment, ManifestEntry, SessionManifest, sortManifestEntries } from './manifestUtils';
 
 const STORAGE_ROOT = `${FileSystem.documentDirectory}storilook`;
 const sessionDir = (sessionId: string) => `${STORAGE_ROOT}/${sessionId}`;
@@ -195,4 +195,26 @@ export async function loadLastSessionManifest(): Promise<SessionManifest | null>
 export async function listSessionMetadata(): Promise<SessionRegistryEntry[]> {
   const registry = await loadRegistry();
   return registry.sessions.sort((a, b) => b.lastUpdated.localeCompare(a.lastUpdated));
+}
+
+export async function addFeedComment(
+  sessionId: string,
+  entryId: string,
+  comment: FeedComment,
+): Promise<ManifestEntry> {
+  const manifest = await loadManifest(sessionId);
+  const entryIndex = manifest.entries.findIndex((e) => e.id === entryId);
+  if (entryIndex === -1) {
+    throw new Error(`Entry ${entryId} introuvable dans la session ${sessionId}`);
+  }
+  const updatedEntry: ManifestEntry = {
+    ...manifest.entries[entryIndex],
+    feedComments: [...(manifest.entries[entryIndex].feedComments ?? []), comment],
+  };
+  const updatedEntries = [...manifest.entries];
+  updatedEntries[entryIndex] = updatedEntry;
+  const updatedManifest: SessionManifest = { ...manifest, entries: updatedEntries };
+  await writeManifest(updatedManifest);
+  await upsertSessionMetadata(updatedManifest);
+  return updatedEntry;
 }

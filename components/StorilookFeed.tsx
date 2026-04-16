@@ -20,6 +20,8 @@ import { FeedComment, ManifestEntry } from '../services/manifestUtils';
 import { serializeSessionSharePayload } from '../services/sessionShare';
 import AnnotationScreen from './AnnotationScreen';
 import CameraHandler from './CameraHandler';
+import PhotoDetailScreen from './PhotoDetailScreen';
+import { saveEntryToGallery, shareEntry } from '../services/mediaShare';
 
 const COLORS = {
   primary: '#FF1493',
@@ -41,9 +43,10 @@ type CaptureState = 'dashboard' | 'camera' | 'annotation';
 interface AlbumGridProps {
   photos: ManifestEntry[];
   onCapture: () => void;
+  onOpenPhoto: (index: number) => void;
 }
 
-const AlbumGrid: React.FC<AlbumGridProps> = ({ photos, onCapture }) => {
+const AlbumGrid: React.FC<AlbumGridProps> = ({ photos, onCapture, onOpenPhoto }) => {
   if (photos.length === 0) {
     return (
       <View style={gridStyles.empty}>
@@ -64,8 +67,12 @@ const AlbumGrid: React.FC<AlbumGridProps> = ({ photos, onCapture }) => {
       columnWrapperStyle={{ gap: 1 }}
       ItemSeparatorComponent={() => <View style={{ height: 1 }} />}
       contentContainerStyle={{ paddingBottom: 120 }}
-      renderItem={({ item }) => (
-        <View style={gridStyles.cell}>
+      renderItem={({ item, index }) => (
+        <TouchableOpacity
+          style={gridStyles.cell}
+          activeOpacity={0.8}
+          onPress={() => onOpenPhoto(index)}
+        >
           <Image source={{ uri: item.fileUri }} style={gridStyles.image} />
           {(item.feedComments?.length ?? 0) > 0 && (
             <View style={gridStyles.commentBadge}>
@@ -74,7 +81,7 @@ const AlbumGrid: React.FC<AlbumGridProps> = ({ photos, onCapture }) => {
               </Text>
             </View>
           )}
-        </View>
+        </TouchableOpacity>
       )}
     />
   );
@@ -121,9 +128,10 @@ const gridStyles = StyleSheet.create({
 interface FeedPostProps {
   entry: ManifestEntry;
   onAddComment: (entryId: string, text: string) => void;
+  onOpenPhoto: () => void;
 }
 
-const FeedPost: React.FC<FeedPostProps> = ({ entry, onAddComment }) => {
+const FeedPost: React.FC<FeedPostProps> = ({ entry, onAddComment, onOpenPhoto }) => {
   const [draft, setDraft] = useState('');
 
   const submitComment = () => {
@@ -157,7 +165,9 @@ const FeedPost: React.FC<FeedPostProps> = ({ entry, onAddComment }) => {
       </View>
 
       {/* Photo */}
-      <Image source={{ uri: entry.fileUri }} style={feedStyles.photo} resizeMode="cover" />
+      <TouchableOpacity activeOpacity={0.95} onPress={onOpenPhoto}>
+        <Image source={{ uri: entry.fileUri }} style={feedStyles.photo} resizeMode="cover" />
+      </TouchableOpacity>
 
       {/* Légende (annotation de capture) */}
       {(entry.comment || (entry.tags && entry.tags.length > 0)) && (
@@ -257,12 +267,13 @@ const feedStyles = StyleSheet.create({
 // ─── Composant principal ──────────────────────────────────────────────────────
 
 export default function StorilookFeed() {
-  const { eventData, triggerSynchronization, addLocalPhoto, addComment } = useStorilookP2P();
+  const { eventData, triggerSynchronization, addLocalPhoto, addComment, deletePhoto } = useStorilookP2P();
   const { syncStatus, eventName, albumFeed, myPhotos, id: sessionId, createdAt, manifestChecksum } = eventData;
 
   const [captureState, setCaptureState] = useState<CaptureState>('dashboard');
   const [capturedPhotoUri, setCapturedPhotoUri] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('album');
+  const [detailIndex, setDetailIndex] = useState<number | null>(null);
 
   const photosToShow = syncStatus === 'complete' ? albumFeed : myPhotos;
 
@@ -300,6 +311,21 @@ export default function StorilookFeed() {
           setCapturedPhotoUri(null);
           setCaptureState('dashboard');
         }}
+      />
+    );
+  }
+
+  // ── Détail photo (plein écran) ──────────────────────────────────────────────
+  if (detailIndex !== null && photosToShow[detailIndex]) {
+    return (
+      <PhotoDetailScreen
+        photos={photosToShow}
+        initialIndex={detailIndex}
+        onClose={() => setDetailIndex(null)}
+        onAddComment={(entryId, text) => addComment(entryId, text)}
+        onDelete={(entryId) => deletePhoto(entryId)}
+        onSave={(entry) => saveEntryToGallery(entry)}
+        onShare={(entry) => shareEntry(entry)}
       />
     );
   }
@@ -357,7 +383,11 @@ export default function StorilookFeed() {
       {/* ── Contenu ── */}
       <View style={styles.content}>
         {viewMode === 'album' ? (
-          <AlbumGrid photos={photosToShow} onCapture={() => setCaptureState('camera')} />
+          <AlbumGrid
+            photos={photosToShow}
+            onCapture={() => setCaptureState('camera')}
+            onOpenPhoto={(index) => setDetailIndex(index)}
+          />
         ) : (
           <FlatList
             data={photosToShow}
@@ -368,10 +398,11 @@ export default function StorilookFeed() {
                 <Text style={styles.syncSub}>Aucune photo pour l'instant.</Text>
               </View>
             }
-            renderItem={({ item }) => (
+            renderItem={({ item, index }) => (
               <FeedPost
                 entry={item}
                 onAddComment={(entryId, text) => addComment(entryId, text)}
+                onOpenPhoto={() => setDetailIndex(index)}
               />
             )}
           />

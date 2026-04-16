@@ -4,6 +4,7 @@ import {
   addFeedComment,
   addLocalCapture,
   computeManifestChecksum,
+  deletePhoto as deletePhotoService,
   initSession,
   loadLastSessionManifest,
   listEntries,
@@ -136,6 +137,31 @@ export const useStorilookP2P = () => {
     [eventState.id],
   );
 
+  const deletePhoto = useCallback(
+    async (entryId: string) => {
+      if (!eventState.id) return;
+      try {
+        await deletePhotoService(eventState.id, entryId);
+        const checksum = await computeManifestChecksum(eventState.id);
+        setEventState((prev) => ({
+          ...prev,
+          myPhotos: prev.myPhotos.filter((e) => e.id !== entryId),
+          albumFeed: prev.albumFeed.filter((e) => e.id !== entryId),
+          manifestChecksum: checksum,
+        }));
+      } catch (error) {
+        console.error(error);
+        Alert.alert('Erreur', 'Impossible de supprimer la photo.');
+      }
+    },
+    [eventState.id],
+  );
+
+  const resetEvent = useCallback(() => {
+    setEventState(INITIAL_STATE);
+    setIsP2PActive(false);
+  }, []);
+
   const triggerSynchronization = useCallback(async () => {
     if (!eventState.id || eventState.syncStatus !== 'advertising') return;
 
@@ -197,5 +223,7 @@ export const useStorilookP2P = () => {
     triggerSynchronization,
     addLocalPhoto,
     addComment,
+    deletePhoto,
+    resetEvent,
   };
 };

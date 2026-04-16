@@ -1,5 +1,9 @@
 import * as FileSystem from 'expo-file-system';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { canonicalManifestString, FeedComment, ManifestEntry, SessionManifest, sortManifestEntries } from './manifestUtils';
+
+const MAX_IMAGE_DIMENSION = 1920;
+const IMAGE_COMPRESSION_QUALITY = 0.8;
 
 const STORAGE_ROOT = `${FileSystem.documentDirectory}storilook`;
 const sessionDir = (sessionId: string) => `${STORAGE_ROOT}/${sessionId}`;
@@ -122,6 +126,20 @@ const buildEntryChecksum = async (entry: Omit<ManifestEntry, 'checksum'>): Promi
   return checksumFromString(payload);
 };
 
+async function compressImage(sourceUri: string): Promise<string> {
+  try {
+    const result = await ImageManipulator.manipulateAsync(
+      sourceUri,
+      [{ resize: { width: MAX_IMAGE_DIMENSION } }],
+      { compress: IMAGE_COMPRESSION_QUALITY, format: ImageManipulator.SaveFormat.JPEG },
+    );
+    return result.uri;
+  } catch (error) {
+    console.warn('Compression image échouée, fallback sur original', error);
+    return sourceUri;
+  }
+}
+
 export async function addLocalCapture(input: CaptureInput): Promise<ManifestEntry> {
   const { sessionId, sourceUri, comment, tags, capturedAt } = input;
   await ensureDir(STORAGE_ROOT);
@@ -132,7 +150,8 @@ export async function addLocalCapture(input: CaptureInput): Promise<ManifestEntr
   const fileName = `photo-${timestamp}-${Math.random().toString(36).substring(2, 8)}.jpg`;
   const targetUri = `${mediaDir(sessionId)}/${fileName}`;
 
-  await FileSystem.copyAsync({ from: sourceUri, to: targetUri });
+  const compressedUri = await compressImage(sourceUri);
+  await FileSystem.copyAsync({ from: compressedUri, to: targetUri });
 
   const entryBase: Omit<ManifestEntry, 'checksum'> = {
     id: fileName,
@@ -217,4 +236,40 @@ export async function addFeedComment(
   await writeManifest(updatedManifest);
   await upsertSessionMetadata(updatedManifest);
   return updatedEntry;
+}
+
+export async function deletePhoto(sessionId: string, entryId: string): Promise<SessionManifest> {
+  const manifest = await loadManifest(sessionId);
+  const entry = manifest.entries.find((e) => e.id === entryId);
+  if (!entry) {
+    throw new Error(`Entry ${entryId} introuvable dans la session ${sessionId}`);
+  }
+  try {
+    await FileSystem.deleteAsync(entry.fileUri, { idempotent: true });
+  } catch (error) {
+    console.warn('Impossible de supprimer le fichier photo', error);
+  }
+  const updatedEntries = manifest.entries.filter((e) => e.id !== entryId);
+  const updatedManifest: SessionManifest = { ...manifest, entries: updatedEntries };
+  await writeManifest(updatedManifest);
+  await upsertSessionMetadata(updatedManifest);
+  return updatedManifest;
+}
+
+export async function deleteSession(sessionId: string): Promise<void> {
+  try {
+    await FileSystem.deleteAsync(sessionDir(sessionId), { idempotent: true });
+  } catch (error) {
+    console.warn(`Impossible de supprimer le dossier de session ${sessionId}`, error);
+  }
+  const registry = await loadRegistry();
+  registry.sessions = registry.sessions.filter((s) => s.sessionId !== sessionId);
+  if (registry.lastSessionId === sessionId) {
+    registry.lastSessionId = registry.sessions.length > 0 ? registry.sessions[0].sessionId : null;
+  }
+  await writeRegistry(registry);
+}
+
+export async function clearAllData(): Promise<void> {
+  await FileSystem.deleteAsync(STORAGE_ROOT, { idempotent: true });
 }

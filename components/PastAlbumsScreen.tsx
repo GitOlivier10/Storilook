@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   RefreshControl,
   StyleSheet,
@@ -9,7 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { loadManifest, listSessionMetadata } from '../services/manifest';
+import { deleteSession, listSessionMetadata, loadManifest } from '../services/manifest';
 
 const COLORS = {
   primary: '#FF1493',
@@ -69,6 +70,29 @@ export default function PastAlbumsScreen() {
     loadAlbums();
   };
 
+  const handleDelete = (item: AlbumItem) => {
+    Alert.alert(
+      `Supprimer "${item.eventName}" ?`,
+      `Cet album (${item.photoCount} photo${item.photoCount > 1 ? 's' : ''}) sera supprimé définitivement.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteSession(item.sessionId);
+              setAlbums((prev) => prev.filter((a) => a.sessionId !== item.sessionId));
+            } catch (error) {
+              console.error('delete session', error);
+              Alert.alert('Erreur', "Impossible de supprimer l'album.");
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const formatDate = (iso: string) =>
     new Date(iso).toLocaleDateString('fr-FR', {
       day: 'numeric',
@@ -110,7 +134,12 @@ export default function PastAlbumsScreen() {
           </View>
         }
         renderItem={({ item }) => (
-          <TouchableOpacity style={styles.card} activeOpacity={0.85}>
+          <TouchableOpacity
+            style={styles.card}
+            activeOpacity={0.85}
+            onLongPress={() => handleDelete(item)}
+            delayLongPress={400}
+          >
             <View style={styles.cardIcon}>
               <Ionicons name="images" size={28} color={COLORS.primary} />
             </View>
@@ -127,7 +156,13 @@ export default function PastAlbumsScreen() {
                 <Text style={styles.cardId}>{item.sessionId}</Text>
               </View>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.lightGray} />
+            <TouchableOpacity
+              onPress={() => handleDelete(item)}
+              hitSlop={8}
+              style={styles.trashBtn}
+            >
+              <Ionicons name="trash-outline" size={20} color="#CCC" />
+            </TouchableOpacity>
           </TouchableOpacity>
         )}
       />

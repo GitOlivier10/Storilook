@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { clearAllData } from '../services/manifest';
 import { getStorageInfo, loadUserProfile, saveUserProfile } from '../services/userProfile';
 
 const COLORS = {
@@ -68,6 +69,31 @@ export default function SettingsScreen() {
     await saveUserProfile({ name: trimmed });
     setUserName(trimmed);
     setEditingName(false);
+  };
+
+  const handleClearAllData = () => {
+    Alert.alert(
+      'Tout effacer ?',
+      'Tous les événements, photos et commentaires seront supprimés définitivement. Cette action est irréversible.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Tout effacer',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await clearAllData();
+              const info = await getStorageInfo();
+              setStorageInfo(info);
+              Alert.alert('Terminé', 'Toutes les données locales ont été effacées. Redémarrez l\'application pour recommencer.');
+            } catch (error) {
+              console.error('clearAllData', error);
+              Alert.alert('Erreur', 'Impossible d\'effacer les données.');
+            }
+          },
+        },
+      ],
+    );
   };
 
   if (loading) {
@@ -134,13 +160,8 @@ export default function SettingsScreen() {
         />
         <SettingRow
           title="Effacer les données"
-          onPress={() =>
-            Alert.alert(
-              'Effacer les données',
-              'Cette fonctionnalité sera disponible prochainement.',
-              [{ text: 'OK' }],
-            )
-          }
+          onPress={handleClearAllData}
+          isDestructive
           showChevron
         />
       </View>

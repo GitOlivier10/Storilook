@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert } from 'react-native';
 import {
+  addFeedComment,
   addLocalCapture,
   computeManifestChecksum,
+  deletePhoto as deletePhotoService,
   initSession,
   loadLastSessionManifest,
   listEntries,
 } from '../services/manifest';
-import { ManifestEntry } from '../services/manifestUtils';
+import { FeedComment, ManifestEntry } from '../services/manifestUtils';
+import { SessionSharePayload } from '../services/sessionShare';
 
 type SyncStatus = 'idle' | 'advertising' | 'negotiating' | 'transferring' | 'complete' | 'error';
 
@@ -20,6 +23,7 @@ interface EventState {
   albumFeed: ManifestEntry[];
   syncStatus: SyncStatus;
   manifestChecksum: string | null;
+  hostSessionId: string | null;
 }
 
 const INITIAL_STATE: EventState = {
@@ -31,6 +35,7 @@ const INITIAL_STATE: EventState = {
   albumFeed: [],
   syncStatus: 'idle',
   manifestChecksum: null,
+  hostSessionId: null,
 };
 
 export const useStorilookP2P = () => {
@@ -52,20 +57,40 @@ export const useStorilookP2P = () => {
         albumFeed: [],
         syncStatus: 'advertising',
         manifestChecksum: checksum,
+        hostSessionId: null,
       });
       setIsP2PActive(true);
-      Alert.alert('Succès', `L'événement '${name}' est lancé. ID: ${manifest.sessionId}`);
     } catch (error) {
       console.error(error);
-      Alert.alert('Erreur', "Impossible de créer la session Storilook. Vérifiez vos permissions de stockage.");
+      Alert.alert('Erreur', "Impossible de créer la session Storilook.");
+    }
+  }, []);
+
+  const joinEvent = useCallback(async (payload: SessionSharePayload, guestName?: string) => {
+    try {
+      const manifest = await initSession(payload.eventName);
+      const checksum = await computeManifestChecksum(manifest.sessionId);
+      setEventState({
+        id: manifest.sessionId,
+        eventName: manifest.eventName,
+        createdAt: manifest.createdAt,
+        participants: [guestName ?? 'Vous'],
+        myPhotos: manifest.entries,
+        albumFeed: [],
+        syncStatus: 'advertising',
+        manifestChecksum: checksum,
+        hostSessionId: payload.sessionId,
+      });
+      setIsP2PActive(true);
+    } catch (error) {
+      console.error(error);
+      Alert.alert('Erreur', "Impossible de rejoindre la session.");
     }
   }, []);
 
   const addLocalPhoto = useCallback(
     async (photoData: { uri: string; comment?: string; tags?: string[]; capturedAt?: string; timestamp?: string }) => {
-      if (!eventState.id) {
-        return;
-      }
+      if (!eventState.id) return;
       try {
         const entry = await addLocalCapture({
           sessionId: eventState.id,
@@ -88,11 +113,59 @@ export const useStorilookP2P = () => {
     [eventState.id],
   );
 
+  const addComment = useCallback(
+    async (entryId: string, text: string, authorName = 'Vous') => {
+      if (!eventState.id) return;
+      try {
+        const comment: FeedComment = {
+          id: `c-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          authorName,
+          text,
+          timestamp: new Date().toISOString(),
+        };
+        const updatedEntry = await addFeedComment(eventState.id, entryId, comment);
+        setEventState((prev) => ({
+          ...prev,
+          myPhotos: prev.myPhotos.map((e) => (e.id === entryId ? updatedEntry : e)),
+          albumFeed: prev.albumFeed.map((e) => (e.id === entryId ? updatedEntry : e)),
+        }));
+      } catch (error) {
+        console.error(error);
+        Alert.alert('Erreur', "Impossible d'ajouter le commentaire.");
+      }
+    },
+    [eventState.id],
+  );
+
+  const deletePhoto = useCallback(
+    async (entryId: string) => {
+      if (!eventState.id) return;
+      try {
+        await deletePhotoService(eventState.id, entryId);
+        const checksum = await computeManifestChecksum(eventState.id);
+        setEventState((prev) => ({
+          ...prev,
+          myPhotos: prev.myPhotos.filter((e) => e.id !== entryId),
+          albumFeed: prev.albumFeed.filter((e) => e.id !== entryId),
+          manifestChecksum: checksum,
+        }));
+      } catch (error) {
+        console.error(error);
+        Alert.alert('Erreur', 'Impossible de supprimer la photo.');
+      }
+    },
+    [eventState.id],
+  );
+
+  const resetEvent = useCallback(() => {
+    setEventState(INITIAL_STATE);
+    setIsP2PActive(false);
+  }, []);
+
   const triggerSynchronization = useCallback(async () => {
     if (!eventState.id || eventState.syncStatus !== 'advertising') return;
 
     setEventState((prev) => ({ ...prev, syncStatus: 'negotiating' }));
-    Alert.alert('Synchro', 'Déclenchement du protocole PMH...');
 
     try {
       const entries = await listEntries(eventState.id);
@@ -105,8 +178,6 @@ export const useStorilookP2P = () => {
         syncStatus: 'complete',
         manifestChecksum: checksum,
       }));
-
-      Alert.alert('Succès', `Album synchronisé. Checksum manifest: ${checksum.slice(0, 8)}…`);
     } catch (error) {
       console.error(error);
       setEventState((prev) => ({ ...prev, syncStatus: 'error' }));
@@ -135,6 +206,7 @@ export const useStorilookP2P = () => {
           albumFeed: [],
           syncStatus: 'advertising',
           manifestChecksum: checksum,
+          hostSessionId: null,
         });
         setIsP2PActive(true);
       } catch (error) {
@@ -147,7 +219,11 @@ export const useStorilookP2P = () => {
     eventData: eventState,
     isP2PActive,
     startEvent,
+    joinEvent,
     triggerSynchronization,
     addLocalPhoto,
+    addComment,
+    deletePhoto,
+    resetEvent,
   };
 };

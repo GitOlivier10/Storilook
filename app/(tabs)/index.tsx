@@ -1,203 +1,233 @@
-// Fichier: app/(tabs)/index.tsx
-
 import React, { useState } from 'react';
-import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-// L'importation de QRCode a été retirée de la logique par défaut
+import {
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import StorilookFeed from '../../components/StorilookFeed';
+import QRScannerScreen from '../../components/QRScannerScreen';
 import { useStorilookP2P } from '../../hooks/useStorilookP2P';
+import { SessionSharePayload } from '../../services/sessionShare';
 
-// --- Constantes de l'Identité Storilook ---
 const COLORS = {
-  primary: '#FF1493',      
-  secondary: '#FF6347',    
-  background: '#FAFAFA',   
-  warning: '#721c24',      
-  warningBg: '#f8d7da',    
+  primary: '#FF1493',
+  secondary: '#FF6347',
+  background: '#FAFAFA',
   text: '#333',
+  lightGray: '#EAEAEA',
+  border: '#DDD',
 };
 
+type HomeState = 'home' | 'create' | 'join';
 
-// --- Composant Création d'Événement (Formulaire) ---
-interface CreateFormProps {
-    eventName: string;
-    setEventName: (v: string) => void;
-    handleCreateEvent: () => void;
-    isLaunched: boolean;
-}
-
-const CreateForm: React.FC<CreateFormProps> = ({ eventName, setEventName, handleCreateEvent, isLaunched }) => (
-    <>
-        <Text style={styles.label}>Nom de l'événement</Text>
-        <TextInput
-            style={styles.input}
-            onChangeText={setEventName}
-            value={eventName}
-            placeholder="Ex: Soirée Amicia"
-            editable={!isLaunched}
-        />
-        <TouchableOpacity style={styles.button} onPress={handleCreateEvent}>
-            <Text style={styles.buttonText}>Créer un Album Storilook Privé</Text>
-        </TouchableOpacity>
-    </>
-);
-
-
-// --- Composant Principal du Tab Index ---
 export default function IndexScreen() {
-    const [eventName, setEventName] = useState('');
-    const { eventData, startEvent } = useStorilookP2P();
-    
-    // Si le syncStatus n'est pas 'idle', l'événement est considéré comme actif
-    const isEventActive = eventData.syncStatus !== 'idle'; 
+  const [homeState, setHomeState] = useState<HomeState>('home');
+  const [eventName, setEventName] = useState('');
+  const { eventData, startEvent, joinEvent } = useStorilookP2P();
 
-    const handleCreateEvent = async () => {
-        if (!eventName) {
-            Alert.alert("Erreur", "Veuillez donner un nom à votre événement Storilook.");
-            return;
-        }
-        await startEvent(eventName);
-    };
+  const isEventActive = eventData.syncStatus !== 'idle';
 
-    // --- LOGIQUE CONDITIONNELLE CLÉ : Affiche le Feed si l'événement est actif ---
-    if (isEventActive) {
-        return <StorilookFeed />;
-    }
+  if (isEventActive) {
+    return <StorilookFeed />;
+  }
 
-    // Sinon, on affiche l'écran de création (Accueil par défaut)
+  if (homeState === 'join') {
     return (
-        <View style={styles.container}>
-            <View style={styles.contentBox}>
-                <Text style={styles.title}>Storilook</Text>
-                <Text style={styles.slogan}>Racontez votre histoire</Text>
-
-                {/* Bloc d'Avertissement Hotspot */}
-                <View style={styles.hotspotInfo}>
-                    <Text style={styles.hotspotText}>
-                        ⚠️ **Préparation :** Activez le **Partage de Connexion Wi-Fi** de votre téléphone avant de commencer.
-                    </Text>
-                </View>
-                
-                <CreateForm 
-                    eventName={eventName} 
-                    setEventName={setEventName} 
-                    handleCreateEvent={handleCreateEvent} 
-                    isLaunched={isEventActive} 
-                />
-            </View>
-        </View>
+      <QRScannerScreen
+        onJoin={(payload: SessionSharePayload) => {
+          setHomeState('home');
+          joinEvent(payload);
+        }}
+        onCancel={() => setHomeState('home')}
+      />
     );
+  }
+
+  if (homeState === 'create') {
+    return (
+      <KeyboardAvoidingView
+        style={styles.screen}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={styles.card}>
+          <Text style={styles.logo}>Storilook</Text>
+          <Text style={styles.cardTitle}>Nouvel événement</Text>
+
+          <Text style={styles.label}>Nom de l'événement</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Ex : Séminaire Mars, Mariage Julie…"
+            placeholderTextColor="#AAA"
+            value={eventName}
+            onChangeText={setEventName}
+            autoFocus
+            returnKeyType="done"
+          />
+
+          <TouchableOpacity
+            style={[styles.btn, styles.btnPrimary]}
+            onPress={async () => {
+              if (!eventName.trim()) return;
+              await startEvent(eventName.trim());
+            }}
+          >
+            <Text style={styles.btnText}>Créer →</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.btnLink} onPress={() => setHomeState('home')}>
+            <Text style={styles.btnLinkText}>Annuler</Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    );
+  }
+
+  // Écran d'accueil
+  return (
+    <View style={styles.screen}>
+      <View style={styles.hero}>
+        <Text style={styles.logo}>Storilook</Text>
+        <Text style={styles.slogan}>Le partage d'événement, sans le cloud.</Text>
+      </View>
+
+      <View style={styles.card}>
+        <TouchableOpacity
+          style={[styles.btn, styles.btnPrimary]}
+          onPress={() => setHomeState('create')}
+        >
+          <Text style={styles.btnText}>📸  Créer un événement</Text>
+        </TouchableOpacity>
+
+        <View style={styles.separator}>
+          <View style={styles.separatorLine} />
+          <Text style={styles.separatorText}>ou</Text>
+          <View style={styles.separatorLine} />
+        </View>
+
+        <TouchableOpacity
+          style={[styles.btn, styles.btnSecondary]}
+          onPress={() => setHomeState('join')}
+        >
+          <Text style={[styles.btnText, styles.btnTextDark]}>📷  Scanner un QR code</Text>
+        </TouchableOpacity>
+
+        <Text style={styles.hint}>
+          Scannez le QR affiché par l'organisateur pour rejoindre un événement.
+        </Text>
+      </View>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: COLORS.background,
-        alignItems: 'center',
-        paddingTop: 40,
-    },
-    contentBox: {
-        width: '90%',
-        maxWidth: 400,
-        backgroundColor: 'white',
-        padding: 30,
-        borderRadius: 16,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
-        shadowRadius: 8,
-        elevation: 5,
-        alignItems: 'center',
-    },
-    title: {
-        fontSize: 30,
-        fontWeight: 'bold',
-        color: COLORS.primary,
-        marginBottom: 5,
-    },
-    slogan: {
-        color: '#6c757d',
-        marginBottom: 25,
-        fontStyle: 'italic',
-        fontSize: 15,
-    },
-    hotspotInfo: {
-        backgroundColor: COLORS.warningBg,
-        borderColor: COLORS.warning,
-        borderWidth: 1,
-        padding: 15,
-        borderRadius: 8,
-        marginBottom: 20,
-        width: '100%',
-    },
-    hotspotText: {
-        fontSize: 13,
-        color: COLORS.warning,
-        lineHeight: 18,
-    },
-    label: {
-        alignSelf: 'flex-start',
-        marginBottom: 5,
-        fontWeight: '600',
-        fontSize: 16,
-        color: COLORS.text,
-    },
-    input: {
-        width: '100%',
-        padding: 12,
-        borderWidth: 2,
-        borderColor: '#ccc',
-        borderRadius: 8,
-        marginBottom: 25,
-        fontSize: 16,
-    },
-    button: {
-        backgroundColor: COLORS.secondary,
-        padding: 14,
-        borderRadius: 8,
-        width: '100%',
-        alignItems: 'center',
-    },
-    buttonText: {
-        color: 'white',
-        fontSize: 18,
-        fontWeight: 'bold',
-    },
-    // Les styles de QR code sont conservés au cas où vous souhaiteriez les réutiliser
-    qrCodeContainer: { 
-        width: '100%',
-        padding: 20,
-        backgroundColor: '#FFC300', 
-        borderRadius: 10,
-        alignItems: 'center',
-    },
-    qrTitle: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: COLORS.text,
-        marginBottom: 5,
-    },
-    qrSubTitle: {
-        fontSize: 14,
-        textAlign: 'center',
-        marginBottom: 15,
-        color: COLORS.text,
-    },
-    qrCodeWrapper: {
-        backgroundColor: 'white',
-        padding: 5,
-        borderRadius: 5,
-        borderWidth: 3,
-        borderColor: COLORS.text,
-    },
-    sessionIdText: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        marginTop: 15,
-        color: COLORS.text,
-    }, 
-    statusText: { // Bloc où l'erreur de syntaxe se produisait
-        fontSize: 13,
-        color: '#555',
-        marginTop: 10 
-    },
+  screen: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+    justifyContent: 'center',
+    padding: 24,
+  },
+  hero: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  logo: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+    letterSpacing: -0.5,
+  },
+  slogan: {
+    fontSize: 14,
+    color: '#888',
+    marginTop: 6,
+    fontStyle: 'italic',
+  },
+  card: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 28,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  cardTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: 8,
+  },
+  input: {
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    padding: 14,
+    fontSize: 16,
+    color: COLORS.text,
+    marginBottom: 20,
+    backgroundColor: '#FAFAFA',
+  },
+  btn: {
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  btnPrimary: {
+    backgroundColor: COLORS.primary,
+  },
+  btnSecondary: {
+    backgroundColor: COLORS.lightGray,
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+  },
+  btnText: {
+    color: 'white',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  btnTextDark: {
+    color: COLORS.text,
+  },
+  btnLink: {
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  btnLinkText: {
+    color: '#888',
+    fontSize: 15,
+  },
+  separator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+  separatorLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: COLORS.lightGray,
+  },
+  separatorText: {
+    marginHorizontal: 12,
+    color: '#AAA',
+    fontSize: 13,
+  },
+  hint: {
+    marginTop: 14,
+    fontSize: 12,
+    color: '#AAA',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
 });

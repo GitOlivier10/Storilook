@@ -1,253 +1,539 @@
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  FlatList,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { useStorilookP2P } from '../hooks/useStorilookP2P';
-import AnnotationScreen from './AnnotationScreen'; // <-- NOUVEL IMPORT
-import CameraHandler from './CameraHandler'; // <-- NOUVEL IMPORT
+import { FeedComment, ManifestEntry } from '../services/manifestUtils';
 import { serializeSessionSharePayload } from '../services/sessionShare';
+import AnnotationScreen from './AnnotationScreen';
+import CameraHandler from './CameraHandler';
+import PhotoDetailScreen from './PhotoDetailScreen';
+import { saveEntryToGallery, shareEntry } from '../services/mediaShare';
 
-// --- Définitions de style (réutilisées) ---
 const COLORS = {
-  primary: '#FF1493',      // Magenta pour l'accent
-  secondary: '#FF6347',    // Orange vif pour les boutons
-  background: '#FAFAFA',   // Fond blanc cassé
+  primary: '#FF1493',
+  secondary: '#FF6347',
+  background: '#FAFAFA',
   text: '#333',
   lightGray: '#EAEAEA',
+  border: '#DDD',
 };
 
-// --- Types pour les posts ---
-interface Post {
-    id: string;
-    user: string;
-    timestamp: string;
-    imageUri: string;
-    comment?: string;
-    tags?: string[];
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const GRID_ITEM_SIZE = (SCREEN_WIDTH - 3) / 2; // 2 colonnes avec 1px de gap
+
+type ViewMode = 'album' | 'feed';
+type CaptureState = 'dashboard' | 'camera' | 'annotation';
+
+// ─── Vue Album : grille 2 colonnes ───────────────────────────────────────────
+
+interface AlbumGridProps {
+  photos: ManifestEntry[];
+  onCapture: () => void;
+  onOpenPhoto: (index: number) => void;
 }
 
-// --- Composant Feed Item ---
-const FeedItem: React.FC<{ post: Post }> = ({ post }) => (
-    <View style={feedStyles.postContainer}>
-        <View style={feedStyles.postHeader}>
-            <Text style={feedStyles.postUsername}>{post.user}</Text>
-            <Text style={feedStyles.postTimestamp}>{post.timestamp}</Text>
-        </View>
-        <Image source={{ uri: post.imageUri }} style={feedStyles.postImage} />
-        <Text style={feedStyles.postComment}>
-            <Text style={{ fontWeight: 'bold' }}>{post.user} : </Text>
-            {post.comment}
-        </Text>
-    </View>
-);
-
-// --- L'écran principal Storilook Feed ---
-export default function StorilookFeed() {
-    
-    const { eventData, triggerSynchronization, addLocalPhoto } = useStorilookP2P();
-    const { syncStatus, eventName, albumFeed, myPhotos, id: sessionId, createdAt, manifestChecksum } = eventData;
-    
-    // NOUVEAUX ÉTATS POUR LA GESTION DE LA CAPTURE
-    const [captureState, setCaptureState] = useState<'dashboard' | 'camera' | 'annotation'>('dashboard');
-    const [capturedPhotoUri, setCapturedPhotoUri] = useState<string | null>(null);
-    const [annotatedMetadata, setAnnotatedMetadata] = useState<any>(null);
-
-
-    const feedPosts: Post[] = useMemo(() => (
-        albumFeed.map((entry) => ({
-            id: entry.id,
-            user: 'Moi',
-            timestamp: new Date(entry.captureTimestamp).toLocaleString(),
-            imageUri: entry.fileUri,
-            comment: entry.comment,
-            tags: entry.tags,
-        }))
-    ), [albumFeed]);
-
-    const sharePayload = useMemo(
-        () =>
-            sessionId
-                ? serializeSessionSharePayload(
-                    { sessionId, eventName, createdAt: createdAt || new Date().toISOString() },
-                    manifestChecksum,
-                )
-                : null,
-        [sessionId, eventName, createdAt, manifestChecksum],
-    );
-
-    // --- GESTION DU FLUX DE CAPTURE ---
-
-    // 1. Passage à l'écran d'annotation après la prise de photo
-    const handlePhotoTaken = (uri: string) => {
-        setCapturedPhotoUri(uri);
-        setCaptureState('annotation');
-    };
-
-    // 2. Finalisation de l'annotation et retour au dashboard
-    const handleAnnotationFinish = async (comment: string, tags: string[]) => {
-        if (!capturedPhotoUri) return;
-
-        await addLocalPhoto({ uri: capturedPhotoUri, comment, tags });
-        setCapturedPhotoUri(null);
-        setCaptureState('dashboard');
-        Alert.alert("Photo Stockée", "Votre photo est enregistrée localement en attendant la synchronisation !");
-    };
-
-
-    // --- LOGIQUE D'AFFICHAGE CONDITIONNEL ---
-
-    // Si l'état de capture est actif, nous affichons la caméra ou l'annotation
-    if (captureState === 'camera') {
-        return <CameraHandler onPhotoCaptured={handlePhotoTaken} />;
-    }
-    
-    if (captureState === 'annotation') {
-        return (
-            <AnnotationScreen 
-                imageUri={capturedPhotoUri || ''} 
-                onFinish={handleAnnotationFinish} 
-            />
-        );
-    }
-    
-    // Si l'état de synchro est 'idle' (hors événement), on affiche un message
-    if (syncStatus === 'idle') {
-        return (
-            <View style={styles.centerContainer}>
-                <Text style={styles.statusTitle}>Bienvenue sur Storilook V1</Text>
-                <Text style={styles.statusSubTitle}>Veuillez démarrer un événement dans l'onglet "En Cours" pour commencer à capturer vos souvenirs.</Text>
-            </View>
-        );
-    }
-
-    // Si l'état est en SYNCHRONISATION (Negotiating ou Transferring)
-    if (syncStatus === 'negotiating' || syncStatus === 'transferring') {
-        return (
-            <View style={styles.centerContainer}>
-                <ActivityIndicator size="large" color={COLORS.primary} />
-                <Text style={styles.statusTitle}>Protocole PMH en cours...</Text>
-                <Text style={styles.statusSubTitle}>Synchronisation P2P en cours. Gardez le partage de connexion actif.</Text>
-            </View>
-        );
-    }
-
-    // Si l'ALBUM EST RÉVÉLÉ (Sync Complete)
-    if (syncStatus === 'complete' && albumFeed.length > 0) {
-        return (
-            <ScrollView style={styles.container}>
-                <Text style={styles.albumTitle}>Album Révélé : {eventName}</Text>
-                <View style={styles.sessionCard}>
-                    <Text style={styles.sessionLabel}>Session locale</Text>
-                    <Text style={styles.sessionValue}>{sessionId}</Text>
-                    <Text style={styles.sessionCreatedAt}>Créé le {new Date(createdAt).toLocaleString()}</Text>
-                    {sharePayload && (
-                        <View style={styles.qrWrapper}>
-                            <QRCode value={sharePayload} size={160} backgroundColor="white" />
-                            <Text style={styles.qrHint}>Scannez pour rejoindre la session P2P.</Text>
-                            <Text style={styles.qrChecksum}>
-                                Checksum manifest : {manifestChecksum ? `${manifestChecksum.slice(0, 8)}…` : 'calcul en cours'}
-                            </Text>
-                        </View>
-                    )}
-                </View>
-                {feedPosts.map((post: Post) => (
-                    <FeedItem key={post.id} post={post} />
-                ))}
-                <View style={{ height: 100 }} />
-            </ScrollView>
-        );
-    }
-
-    // ÉVÉNEMENT ACTIF : PHASE DE CAPTURE (Dashboard)
+const AlbumGrid: React.FC<AlbumGridProps> = ({ photos, onCapture, onOpenPhoto }) => {
+  if (photos.length === 0) {
     return (
-        <View style={styles.captureContainer}>
-            <ScrollView style={styles.scrollView}>
-                <View style={styles.header}>
-                    <Text style={styles.eventName}>{eventName}</Text>
-                    <Text style={styles.eventStatus}>Statut : En Attente de Synchro ({syncStatus})</Text>
-                </View>
-
-                <View style={styles.sessionCard}>
-                    <Text style={styles.sessionLabel}>Session locale</Text>
-                    <Text style={styles.sessionValue}>{sessionId}</Text>
-                    <Text style={styles.sessionCreatedAt}>Créé le {new Date(createdAt).toLocaleString()}</Text>
-                    <Text style={styles.sessionChecksum}>
-                        Checksum manifest : {manifestChecksum ? `${manifestChecksum.slice(0, 8)}…` : 'calcul en cours'}
-                    </Text>
-                    {sharePayload && (
-                        <View style={styles.qrInline}>
-                            <QRCode value={sharePayload} size={120} backgroundColor="white" />
-                            <Text style={styles.qrHint}>Partagez ce QR pour connecter les invités en local.</Text>
-                        </View>
-                    )}
-                </View>
-
-                {/* Bloc de Statut de la Capture */}
-                <View style={styles.captureStatusBox}>
-                    <Text style={styles.captureText}>
-                        Photos Capturées Localement : <Text style={styles.countText}>{myPhotos.length}</Text>
-                    </Text>
-                    <Text style={styles.captureText}>
-                        Participants : <Text style={styles.countText}>{eventData.participants.length}</Text>
-                    </Text>
-                </View>
-
-                {/* Bouton de capture réel */}
-                <TouchableOpacity 
-                    style={styles.captureButton} 
-                    onPress={() => setCaptureState('camera')} // <-- LANCE LE CameraHandler
-                >
-                    <Text style={styles.captureButtonText}>📷 Prendre une Photo</Text>
-                </TouchableOpacity>
-
-            </ScrollView>
-
-            {/* Bouton de Déclenchement de la Synchronisation */}
-            <TouchableOpacity 
-                style={styles.syncButton} 
-                onPress={triggerSynchronization} 
-            >
-                <Text style={styles.syncButtonText}>Révéler l'Album Commun (Synchro)</Text>
-            </TouchableOpacity>
-        </View>
+      <View style={gridStyles.empty}>
+        <Text style={gridStyles.emptyIcon}>📷</Text>
+        <Text style={gridStyles.emptyText}>Aucune photo pour l'instant</Text>
+        <TouchableOpacity style={gridStyles.emptyBtn} onPress={onCapture}>
+          <Text style={gridStyles.emptyBtnText}>Prendre une photo</Text>
+        </TouchableOpacity>
+      </View>
     );
-}
+  }
 
-// Styles sont conservés pour la complétude
-const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: COLORS.background },
-    centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 30, backgroundColor: COLORS.background, },
-    statusTitle: { fontSize: 22, fontWeight: 'bold', color: COLORS.text, marginTop: 15, textAlign: 'center', },
-    statusSubTitle: { fontSize: 16, color: '#6c757d', marginTop: 10, textAlign: 'center', },
-    tipText: { fontSize: 14, color: COLORS.primary, marginTop: 20, fontStyle: 'italic', textAlign: 'center', },
-    albumTitle: { fontSize: 24, fontWeight: 'bold', color: COLORS.text, textAlign: 'center', paddingVertical: 15, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: COLORS.lightGray, },
-    captureContainer: { flex: 1, backgroundColor: COLORS.background, },
-    scrollView: { paddingHorizontal: 20, paddingTop: 20, },
-    header: { marginBottom: 20, },
-    eventName: { fontSize: 28, fontWeight: 'bold', color: COLORS.text, },
-    eventStatus: { fontSize: 14, color: COLORS.primary, fontWeight: '600', },
-    captureStatusBox: { backgroundColor: 'white', padding: 20, borderRadius: 10, marginBottom: 30, borderLeftWidth: 5, borderLeftColor: COLORS.secondary, },
-    captureText: { fontSize: 16, color: COLORS.text, marginBottom: 5, },
-    countText: { fontWeight: 'bold', color: COLORS.secondary, },
-    captureButton: { backgroundColor: COLORS.lightGray, padding: 40, borderRadius: 15, borderWidth: 2, borderColor: COLORS.lightGray, alignItems: 'center', justifyContent: 'center', },
-    captureButtonText: { fontSize: 24, fontWeight: 'bold', color: COLORS.text, },
-    syncButton: { backgroundColor: COLORS.primary, padding: 20, alignItems: 'center', position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10, borderTopLeftRadius: 10, borderTopRightRadius: 10, },
-    syncButtonText: { color: 'white', fontSize: 18, fontWeight: 'bold', },
-    sessionCard: { backgroundColor: 'white', padding: 16, borderRadius: 10, marginBottom: 20, borderWidth: 1, borderColor: COLORS.lightGray },
-    sessionLabel: { fontSize: 14, color: COLORS.text, fontWeight: '600' },
-    sessionValue: { fontSize: 18, fontWeight: 'bold', color: COLORS.primary, marginTop: 6 },
-    sessionCreatedAt: { fontSize: 13, color: '#666', marginTop: 2 },
-    sessionChecksum: { fontSize: 13, color: '#666', marginTop: 6 },
-    qrInline: { marginTop: 12, alignItems: 'center' },
-    qrWrapper: { marginTop: 16, alignItems: 'center', backgroundColor: 'white', padding: 10, borderRadius: 8 },
-    qrHint: { fontSize: 12, color: '#555', marginTop: 8, textAlign: 'center' },
-    qrChecksum: { fontSize: 12, color: '#555', marginTop: 4 },
+  return (
+    <FlatList
+      data={photos}
+      keyExtractor={(item) => item.id}
+      numColumns={2}
+      columnWrapperStyle={{ gap: 1 }}
+      ItemSeparatorComponent={() => <View style={{ height: 1 }} />}
+      contentContainerStyle={{ paddingBottom: 120 }}
+      renderItem={({ item, index }) => (
+        <TouchableOpacity
+          style={gridStyles.cell}
+          activeOpacity={0.8}
+          onPress={() => onOpenPhoto(index)}
+        >
+          <Image source={{ uri: item.fileUri }} style={gridStyles.image} />
+          {(item.feedComments?.length ?? 0) > 0 && (
+            <View style={gridStyles.commentBadge}>
+              <Text style={gridStyles.commentBadgeText}>
+                💬 {item.feedComments!.length}
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      )}
+    />
+  );
+};
+
+const gridStyles = StyleSheet.create({
+  cell: {
+    width: GRID_ITEM_SIZE,
+    height: GRID_ITEM_SIZE,
+    backgroundColor: COLORS.lightGray,
+  },
+  image: { width: '100%', height: '100%' },
+  commentBadge: {
+    position: 'absolute',
+    bottom: 6,
+    right: 6,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  commentBadgeText: { color: 'white', fontSize: 11 },
+  empty: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 80,
+    gap: 12,
+  },
+  emptyIcon: { fontSize: 48 },
+  emptyText: { fontSize: 16, color: '#AAA' },
+  emptyBtn: {
+    marginTop: 8,
+    backgroundColor: COLORS.primary,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 10,
+  },
+  emptyBtnText: { color: 'white', fontWeight: '700', fontSize: 15 },
 });
 
+// ─── Vue Feed : style Instagram avec commentaires ─────────────────────────────
+
+interface FeedPostProps {
+  entry: ManifestEntry;
+  onAddComment: (entryId: string, text: string) => void;
+  onOpenPhoto: () => void;
+}
+
+const FeedPost: React.FC<FeedPostProps> = ({ entry, onAddComment, onOpenPhoto }) => {
+  const [draft, setDraft] = useState('');
+
+  const submitComment = () => {
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+    onAddComment(entry.id, trimmed);
+    setDraft('');
+  };
+
+  const timeAgo = (iso: string) => {
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'À l\'instant';
+    if (mins < 60) return `il y a ${mins} min`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `il y a ${hrs} h`;
+    return `il y a ${Math.floor(hrs / 24)} j`;
+  };
+
+  return (
+    <View style={feedStyles.post}>
+      {/* En-tête */}
+      <View style={feedStyles.header}>
+        <View style={feedStyles.avatar}>
+          <Text style={feedStyles.avatarText}>V</Text>
+        </View>
+        <View>
+          <Text style={feedStyles.author}>Vous</Text>
+          <Text style={feedStyles.time}>{timeAgo(entry.captureTimestamp)}</Text>
+        </View>
+      </View>
+
+      {/* Photo */}
+      <TouchableOpacity activeOpacity={0.95} onPress={onOpenPhoto}>
+        <Image source={{ uri: entry.fileUri }} style={feedStyles.photo} resizeMode="cover" />
+      </TouchableOpacity>
+
+      {/* Légende (annotation de capture) */}
+      {(entry.comment || (entry.tags && entry.tags.length > 0)) && (
+        <View style={feedStyles.caption}>
+          {entry.comment ? <Text style={feedStyles.captionText}>{entry.comment}</Text> : null}
+          {entry.tags && entry.tags.length > 0 && (
+            <Text style={feedStyles.tags}>{entry.tags.map((t) => `#${t}`).join(' ')}</Text>
+          )}
+        </View>
+      )}
+
+      {/* Commentaires existants */}
+      {(entry.feedComments ?? []).map((c: FeedComment) => (
+        <View key={c.id} style={feedStyles.commentRow}>
+          <Text style={feedStyles.commentAuthor}>{c.authorName}</Text>
+          <Text style={feedStyles.commentText}> {c.text}</Text>
+        </View>
+      ))}
+
+      {/* Saisie commentaire */}
+      <View style={feedStyles.inputRow}>
+        <TextInput
+          style={feedStyles.commentInput}
+          placeholder="Ajouter un commentaire…"
+          placeholderTextColor="#BBB"
+          value={draft}
+          onChangeText={setDraft}
+          returnKeyType="send"
+          onSubmitEditing={submitComment}
+          blurOnSubmit={false}
+        />
+        {draft.trim().length > 0 && (
+          <TouchableOpacity onPress={submitComment} style={feedStyles.sendBtn}>
+            <Text style={feedStyles.sendText}>Publier</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
+};
+
 const feedStyles = StyleSheet.create({
-    postContainer: { backgroundColor: 'white', marginBottom: 10, borderBottomWidth: 1, borderBottomColor: COLORS.lightGray, },
-    postHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 10, },
-    postUsername: { fontWeight: 'bold', fontSize: 16, color: COLORS.text, },
-    postTimestamp: { fontSize: 12, color: '#999', },
-    postImage: { width: '100%', height: 450, backgroundColor: COLORS.lightGray, },
-    postComment: { padding: 10, fontSize: 14, color: COLORS.text, },
+  post: {
+    backgroundColor: 'white',
+    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.lightGray,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    gap: 10,
+  },
+  avatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarText: { color: 'white', fontWeight: '700', fontSize: 15 },
+  author: { fontWeight: '700', fontSize: 14, color: COLORS.text },
+  time: { fontSize: 12, color: '#AAA' },
+  photo: { width: '100%', aspectRatio: 1 },
+  caption: { padding: 12, paddingBottom: 6 },
+  captionText: { fontSize: 14, color: COLORS.text, lineHeight: 20 },
+  tags: { fontSize: 13, color: COLORS.primary, marginTop: 4 },
+  commentRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 12,
+    paddingVertical: 3,
+  },
+  commentAuthor: { fontWeight: '700', fontSize: 13, color: COLORS.text },
+  commentText: { fontSize: 13, color: COLORS.text, flex: 1 },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: COLORS.lightGray,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  commentInput: {
+    flex: 1,
+    fontSize: 14,
+    color: COLORS.text,
+    paddingVertical: 0,
+  },
+  sendBtn: {},
+  sendText: { color: COLORS.primary, fontWeight: '700', fontSize: 14 },
+});
+
+// ─── Composant principal ──────────────────────────────────────────────────────
+
+export default function StorilookFeed() {
+  const { eventData, triggerSynchronization, addLocalPhoto, addComment, deletePhoto } = useStorilookP2P();
+  const { syncStatus, eventName, albumFeed, myPhotos, id: sessionId, createdAt, manifestChecksum } = eventData;
+
+  const [captureState, setCaptureState] = useState<CaptureState>('dashboard');
+  const [capturedPhotoUri, setCapturedPhotoUri] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('album');
+  const [detailIndex, setDetailIndex] = useState<number | null>(null);
+
+  const photosToShow = syncStatus === 'complete' ? albumFeed : myPhotos;
+
+  const sharePayload = useMemo(
+    () =>
+      sessionId
+        ? serializeSessionSharePayload(
+            { sessionId, eventName, createdAt: createdAt || new Date().toISOString() },
+            manifestChecksum,
+          )
+        : null,
+    [sessionId, eventName, createdAt, manifestChecksum],
+  );
+
+  // ── Flux de capture ──────────────────────────────────────────────────────────
+
+  if (captureState === 'camera') {
+    return (
+      <CameraHandler
+        onPhotoCaptured={(uri) => {
+          setCapturedPhotoUri(uri);
+          setCaptureState('annotation');
+        }}
+      />
+    );
+  }
+
+  if (captureState === 'annotation') {
+    return (
+      <AnnotationScreen
+        imageUri={capturedPhotoUri ?? ''}
+        onFinish={async (comment, tags) => {
+          if (!capturedPhotoUri) return;
+          await addLocalPhoto({ uri: capturedPhotoUri, comment, tags });
+          setCapturedPhotoUri(null);
+          setCaptureState('dashboard');
+        }}
+      />
+    );
+  }
+
+  // ── Détail photo (plein écran) ──────────────────────────────────────────────
+  if (detailIndex !== null && photosToShow[detailIndex]) {
+    return (
+      <PhotoDetailScreen
+        photos={photosToShow}
+        initialIndex={detailIndex}
+        onClose={() => setDetailIndex(null)}
+        onAddComment={(entryId, text) => addComment(entryId, text)}
+        onDelete={(entryId) => deletePhoto(entryId)}
+        onSave={(entry) => saveEntryToGallery(entry)}
+        onShare={(entry) => shareEntry(entry)}
+      />
+    );
+  }
+
+  // ── Synchronisation en cours ─────────────────────────────────────────────────
+
+  if (syncStatus === 'negotiating' || syncStatus === 'transferring') {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.syncTitle}>Synchronisation en cours…</Text>
+        <Text style={styles.syncSub}>Gardez l'app au premier plan.</Text>
+      </View>
+    );
+  }
+
+  // ── Dashboard principal ──────────────────────────────────────────────────────
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.screen}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={90}
+    >
+      {/* ── Header ── */}
+      <View style={styles.headerBar}>
+        <View style={styles.headerLeft}>
+          <Text style={styles.eventName} numberOfLines={1}>{eventName}</Text>
+          <Text style={styles.eventMeta}>
+            {photosToShow.length} photo{photosToShow.length > 1 ? 's' : ''} · {eventData.participants.length} participant{eventData.participants.length > 1 ? 's' : ''}
+          </Text>
+        </View>
+
+        {/* Toggle Album / Feed */}
+        <View style={styles.toggle}>
+          <TouchableOpacity
+            style={[styles.toggleBtn, viewMode === 'album' && styles.toggleActive]}
+            onPress={() => setViewMode('album')}
+          >
+            <Text style={[styles.toggleText, viewMode === 'album' && styles.toggleTextActive]}>
+              ⊞ Album
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.toggleBtn, viewMode === 'feed' && styles.toggleActive]}
+            onPress={() => setViewMode('feed')}
+          >
+            <Text style={[styles.toggleText, viewMode === 'feed' && styles.toggleTextActive]}>
+              ☰ Feed
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* ── Contenu ── */}
+      <View style={styles.content}>
+        {viewMode === 'album' ? (
+          <AlbumGrid
+            photos={photosToShow}
+            onCapture={() => setCaptureState('camera')}
+            onOpenPhoto={(index) => setDetailIndex(index)}
+          />
+        ) : (
+          <FlatList
+            data={photosToShow}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={{ paddingBottom: 120 }}
+            ListEmptyComponent={
+              <View style={styles.center}>
+                <Text style={styles.syncSub}>Aucune photo pour l'instant.</Text>
+              </View>
+            }
+            renderItem={({ item, index }) => (
+              <FeedPost
+                entry={item}
+                onAddComment={(entryId, text) => addComment(entryId, text)}
+                onOpenPhoto={() => setDetailIndex(index)}
+              />
+            )}
+          />
+        )}
+      </View>
+
+      {/* ── Barre inférieure ── */}
+      <View style={styles.bottomBar}>
+        {/* QR Code compact */}
+        {sharePayload && syncStatus !== 'complete' && (
+          <TouchableOpacity
+            style={styles.qrCompact}
+            onPress={() =>
+              Alert.alert(
+                'QR de session',
+                `ID : ${sessionId}\nPartagez ce QR pour que vos invités rejoignent l'événement.`,
+              )
+            }
+          >
+            <QRCode value={sharePayload} size={44} backgroundColor="white" />
+          </TouchableOpacity>
+        )}
+
+        {/* Bouton capture */}
+        <TouchableOpacity style={styles.captureBtn} onPress={() => setCaptureState('camera')}>
+          <Text style={styles.captureBtnText}>📷</Text>
+        </TouchableOpacity>
+
+        {/* Bouton sync */}
+        {syncStatus === 'advertising' && (
+          <TouchableOpacity style={styles.syncBtn} onPress={triggerSynchronization}>
+            <Text style={styles.syncBtnText}>Révéler l'album</Text>
+          </TouchableOpacity>
+        )}
+        {syncStatus === 'complete' && (
+          <View style={styles.syncDone}>
+            <Text style={styles.syncDoneText}>✓ Album synchronisé</Text>
+          </View>
+        )}
+      </View>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: COLORS.background },
+
+  // Header
+  headerBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'white',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.lightGray,
+  },
+  headerLeft: { flex: 1, marginRight: 12 },
+  eventName: { fontSize: 17, fontWeight: '700', color: COLORS.text },
+  eventMeta: { fontSize: 12, color: '#AAA', marginTop: 2 },
+
+  // Toggle
+  toggle: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.lightGray,
+    borderRadius: 8,
+    padding: 2,
+  },
+  toggleBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  toggleActive: { backgroundColor: 'white' },
+  toggleText: { fontSize: 12, color: '#AAA', fontWeight: '600' },
+  toggleTextActive: { color: COLORS.primary },
+
+  // Contenu
+  content: { flex: 1 },
+
+  // Center
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
+  syncTitle: { fontSize: 18, fontWeight: '700', color: COLORS.text, marginTop: 16 },
+  syncSub: { fontSize: 14, color: '#AAA', marginTop: 8, textAlign: 'center' },
+
+  // Barre inférieure
+  bottomBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    borderTopWidth: 1,
+    borderTopColor: COLORS.lightGray,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    paddingBottom: Platform.OS === 'ios' ? 24 : 10,
+    gap: 12,
+  },
+  qrCompact: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 8,
+    padding: 2,
+  },
+  captureBtn: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: COLORS.secondary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  captureBtnText: { fontSize: 24 },
+  syncBtn: {
+    flex: 1,
+    backgroundColor: COLORS.primary,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  syncBtnText: { color: 'white', fontWeight: '700', fontSize: 15 },
+  syncDone: {
+    flex: 1,
+    backgroundColor: '#E8F5E9',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  syncDoneText: { color: '#2E7D32', fontWeight: '700', fontSize: 15 },
 });

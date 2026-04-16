@@ -1,5 +1,12 @@
 export type ManifestEntryStatus = 'local' | 'synced';
 
+export interface FeedComment {
+  id: string;
+  authorName: string;
+  text: string;
+  timestamp: string;
+}
+
 export interface ManifestEntry {
   id: string;
   fileName: string;
@@ -7,6 +14,7 @@ export interface ManifestEntry {
   captureTimestamp: string;
   comment?: string;
   tags?: string[];
+  feedComments?: FeedComment[];
   checksum: string;
   status: ManifestEntryStatus;
 }

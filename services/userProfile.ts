@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 const STORAGE_ROOT = `${FileSystem.documentDirectory}storilook`;
 const PROFILE_FILE = `${STORAGE_ROOT}/profile.json`;
